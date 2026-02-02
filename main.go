@@ -7,7 +7,9 @@ import (
 )
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,26 +21,47 @@ import (
 )
 
 var (
-    headerStyle = lipgloss.NewStyle().
-        Foreground(lipgloss.Color("#FAFAFA")).
-        Background(lipgloss.Color("#7D56F4")).
-        Padding(0, 1).
-        Bold(true)
+	headerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#7D56F4")).
+			Padding(0, 1).
+			Bold(true)
 
-    tokenStyle = lipgloss.NewStyle().
-        Foreground(lipgloss.Color("#FAFAFA")).
-        Background(lipgloss.Color("#5A5A5A")). // Dark Grey
-        Padding(0, 1)
+	tokenStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#5A5A5A")). // Dark Grey
+			Padding(0, 1)
 
-    keyStyle = lipgloss.NewStyle().
-        Foreground(lipgloss.Color("#FAFAFA")).
-        Background(lipgloss.Color("#3C3C3C")).
-        Padding(0, 1).
-        MarginRight(1)
+	keyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#3C3C3C")).
+			Padding(0, 1).
+			MarginRight(1)
 
-    descStyle = lipgloss.NewStyle().
-        Foreground(lipgloss.Color("#A0A0A0")).
-        MarginRight(3)
+	descStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#A0A0A0")).
+			MarginRight(3)
+
+	gitignoreFileStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#909090")).
+				MarginRight(3)
+
+	binFileStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#909090")).
+			MarginRight(3)
+
+	textFileStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			MarginRight(3)
+
+	selectedFileStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6F6")).
+				MarginRight(3)
+
+	someSelectedStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffa000")).
+				MarginRight(3)
+
 )
 
 // --- 1. DATA STRUCTURES ---
@@ -47,22 +70,71 @@ type FileNode struct {
 	Name     string
 	Path     string
 	IsDir    bool
+	IsBinary bool
 	Size     int64
 	Children []*FileNode
 	Parent   *FileNode // Back-reference helper
 
 	// State
-	Expanded bool
-	Selected bool
-	Depth    int
+	Expanded     bool
+	Selected     bool
+	SomeSelected bool
+	Depth        int
 }
 
+func (n *FileNode) SetSelectParentFromChild(selected bool) {
+	if n.Parent == nil {
+		return
+	}
+	
+	if selected == true{
+		if n.Parent.Selected == false{
+			//check all children
+
+			allSelected := true
+			for _, node := range n.Parent.Children{
+				if node.Selected == false{
+					allSelected = false
+					break;
+				}
+			}
+			if allSelected {
+				n.Parent.SomeSelected = false;
+				n.Parent.Selected = true;
+			} else{
+				n.Parent.SomeSelected = true;
+			}
+		}
+	} else{
+		if n.Parent.Selected == true || n.Parent.SomeSelected == true{
+			//check all children
+
+			allNotSelected := true
+			for _, node := range n.Parent.Children{
+				if node.Selected == true{
+					allNotSelected = false
+					break;
+				}
+			}
+			if allNotSelected {
+				n.Parent.Selected = false;
+				n.Parent.SomeSelected = false;
+			} else{
+				n.Parent.SomeSelected = true;
+				n.Parent.Selected = false;
+			}
+		}
+	}
+
+
+}
 // Recursive function to select/deselect a node and all its children
 func (n *FileNode) SetSelected(selected bool) {
 	n.Selected = selected
 	for _, child := range n.Children {
 		child.SetSelected(selected)
 	}
+	n.SetSelectParentFromChild(selected)
 }
 
 // Toggle expansion (only for directories)
@@ -109,13 +181,18 @@ func buildFileTree(rootPath string) (*FileNode, error) {
 		if parent != nil {
 			info, _ := d.Info()
 			var size int64
+			var isBin bool
 			if info != nil {
 				size = info.Size()
+				if !d.IsDir() {
+					isBin = isBinaryFile(path)
+				}
 			}
 			node := &FileNode{
 				Name:     d.Name(),
 				Path:     path,
 				Size:     size,
+				IsBinary: isBin,
 				IsDir:    d.IsDir(),
 				Parent:   parent,
 				Depth:    parent.Depth + 1,
@@ -172,7 +249,6 @@ func flattenVisible(root *FileNode) []*FileNode {
 	for _, n := range result {
 		names = append(names, n.Name)
 	}
-	log.Printf("Visible List: %v", names)
 	return result
 }
 
@@ -211,25 +287,14 @@ func (m model) renderContent() string {
 	var s strings.Builder
 
 	for i, node := range m.visibleNodes {
-		// 1. Cursor
-		cursor := " "
-		if m.cursor == i {
-			cursor = ">"
-		}
-
-		// 2. Checkbox
-		check := "[ ]"
-		if node.Selected {
-			check = "[x]"
-		}
 
 		// 3. Icon
-		icon := "📄"
+		icon := ""
 		if node.IsDir {
 			if node.Expanded {
-				icon = "📂"
+				icon = "▼"
 			} else {
-				icon = "📁"
+				icon = "▶"
 			}
 		}
 
@@ -237,12 +302,23 @@ func (m model) renderContent() string {
 		indent := strings.Repeat("  ", node.Depth)
 
 		// 5. Build Line
-		line := fmt.Sprintf("%s%s%s %s %s", cursor, indent, check, icon, node.Name)
+		line := fmt.Sprintf("%s %s %s", indent, icon, node.Name)
+
+		style := binFileStyle
+
+		if node.Selected {
+			style = selectedFileStyle
+		} else if node.SomeSelected {
+			style = someSelectedStyle
+		} else if !node.IsBinary{
+			style = textFileStyle
+		}
 
 		// Highlight
 		if m.cursor == i {
-			line = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line)
+			style = style.Width(m.viewport.Width).Background(lipgloss.Color("#444"))
 		}
+		line = style.Render(line)
 
 		s.WriteString(line + "\n")
 	}
@@ -250,6 +326,7 @@ func (m model) renderContent() string {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	log.Printf("%+v", msg)
 
 	switch msg := msg.(type) {
 
@@ -292,33 +369,67 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewport.SetYOffset(m.viewport.YOffset + 1)
 			}
 
-		case " ":
+		case "enter":
 			node := m.visibleNodes[m.cursor]
 			if node.IsDir {
 				node.ToggleExpand()
 				m.visibleNodes = flattenVisible(m.root)
 			}
-
-		case "a": 
+		case "ctrl+d":
+			m.viewport.PageDown()
+			m.cursor = min(m.cursor+m.viewport.Height, len(m.visibleNodes)-1)
+		case "ctrl+u":
+			m.viewport.PageUp()
+			m.cursor = max(m.cursor-m.viewport.Height, 0)
+		case "g":
+			m.cursor = 0
+			m.viewport.GotoTop()
+		case "G":
+			m.cursor = len(m.visibleNodes) - 1
+			m.viewport.GotoBottom()
+		case "a":
 			allNodesSelected := true
 			for _, node := range m.visibleNodes {
-				if node.Selected != true{
-					allNodesSelected = false;
-					break;
+				if node.Selected != true {
+					allNodesSelected = false
+					break
 				}
 			}
 
-			
 			for _, node := range m.visibleNodes {
-				if allNodesSelected{
-				node.SetSelected(false)
-				} else{
-				node.SetSelected(true)
+				if allNodesSelected {
+					node.SetSelected(false)
+				} else {
+					node.SetSelected(true)
+				}
+			}
+		case "T":
+			allNodesExpanded := true
+			for _, node := range m.visibleNodes {
+				if node.Expanded != true && node.IsDir {
+					allNodesExpanded = false
+					break
 				}
 			}
 
-		case "s", "enter": // Added enter for selection too if you like
+			for _, node := range m.visibleNodes {
+				if node.IsDir {
+					if allNodesExpanded {
+						node.Expanded = false
+					} else {
+						node.Expanded = true
+					}
+				}
+			}
+
+			m.visibleNodes = flattenVisible(m.root)
+		case "y":
+
+		case " ", "s": // Added enter for selection too if you like
 			node := m.visibleNodes[m.cursor]
+			if node.IsBinary {
+				return m, nil
+			}
 			newState := !node.Selected
 			node.SetSelected(newState)
 		}
@@ -331,6 +442,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) ToClipboard() {
+
+}
+
 // --- VIEW ---
 func (m model) View() string {
 	if !m.ready {
@@ -341,64 +456,100 @@ func (m model) View() string {
 }
 
 func (m model) ViewHeader() string {
-    title := "Punjado"
-    
-    // Calculate tokens
-    count := m.countSelectedTokens()
-    tokenText := fmt.Sprintf("%d tokens", count)
+	title := "Punjado"
 
-    // Change color if too large (>32k)
-    style := tokenStyle
-    if count > 32000 {
-        style = style.Background(lipgloss.Color("#E03A3E")) // Red warning
-    }
+	// Calculate tokens
+	count := m.countSelectedTokens()
+	tokenText := fmt.Sprintf("%d tokens", count)
 
-    // Calculate space between title and tokens
-    // m.width is the total terminal width we saved in Update
-    // We subtract the length of our text to know how many spaces to add
-    w := m.width - lipgloss.Width(title) - lipgloss.Width(tokenText) - 4 // -4 for padding safety
-    if w < 0 { w = 0 }
-    spacer := strings.Repeat(" ", w)
+	// Change color if too large (>32k)
+	style := tokenStyle
+	if count > 32000 {
+		style = style.Background(lipgloss.Color("#E03A3E")) // Red warning
+	}
 
-    // Render: [Title] [Spacer] [Tokens]
-    return headerStyle.Render(title) + spacer + style.Render(tokenText) + "\n"
+	// Calculate space between title and tokens
+	// m.width is the total terminal width we saved in Update
+	// We subtract the length of our text to know how many spaces to add
+	w := m.width - lipgloss.Width(title) - lipgloss.Width(tokenText) - 4 // -4 for padding safety
+	if w < 0 {
+		w = 0
+	}
+	spacer := strings.Repeat(" ", w)
+
+	// Render: [Title] [Spacer] [Tokens]
+	return headerStyle.Render(title) + spacer + style.Render(tokenText) + "\n"
 }
 
 func (m model) ViewFooter() string {
-    // Helper to make a key:value pair
-    key := func(k, desc string) string {
-        return keyStyle.Render(k) + descStyle.Render(desc)
-    }
+	// Helper to make a key:value pair
+	key := func(k, desc string) string {
+		return keyStyle.Render(k) + descStyle.Render(desc)
+	}
 
-    return "\n" + 
-        key("↑/↓", "move") +
-        key("space", "toggle dir") +
-        key("s", "select") + 
-        key("q", "quit") +
-        key("a", "toggle all")
+	return "\n" +
+		key("↑/↓", "move") +
+		key("space", "toggle dir") +
+		key("s", "select") +
+		key("q", "quit") +
+		key("a", "toggle all") +
+		key("y", "to clipboard")
 }
 
 func (m model) countSelectedTokens() int {
-    var totalSize int64
-    
-    // Recursive helper
-    var traverse func(n *FileNode)
-    traverse = func(n *FileNode) {
-        // If it's a file and it's selected, add its size
-        if !n.IsDir && n.Selected {
-            totalSize += n.Size
-        }
-        // Always check children (even if parent isn't selected, 
-        // logic might allow partial selection later)
-        for _, child := range n.Children {
-            traverse(child)
-        }
-    }
-    
-    traverse(m.root)
-    
-    // Heuristic: 1 token ~= 4 bytes
-    return int(totalSize / 4)
+	var totalSize int64
+
+	// Recursive helper
+	var traverse func(n *FileNode)
+	traverse = func(n *FileNode) {
+		// If it's a file and it's selected, add its size
+		if !n.IsDir && n.Selected {
+			totalSize += n.Size
+		}
+		// Always check children (even if parent isn't selected,
+		// logic might allow partial selection later)
+		for _, child := range n.Children {
+			traverse(child)
+		}
+	}
+
+	traverse(m.root)
+
+	// Heuristic: 1 token ~= 4 bytes
+	return int(totalSize / 4)
+}
+
+func isBinaryFile(path string) bool {
+	// 1. Fast Path: Check common extensions to avoid disk I/O
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", // Images
+		".pdf", ".zip", ".tar", ".gz", ".7z", ".rar", // Archives
+		".exe", ".dll", ".so", ".dylib", ".bin", // Executables
+		".mp3", ".mp4", ".wav", ".avi", ".mov": // Media
+		return true
+	}
+
+	// 2. Slow Path: Read the first 512 bytes
+	f, err := os.Open(path)
+	if err != nil {
+		return false // If we can't read it, assume it's text (or handle error)
+	}
+	defer f.Close()
+
+	// Read up to 512 bytes
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return false
+	}
+	buf = buf[:n]
+
+	if bytes.IndexByte(buf, 0) != -1 {
+		return true
+	}
+
+	return false
 }
 
 func main() {
