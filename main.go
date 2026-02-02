@@ -145,9 +145,13 @@ type model struct {
 	width        int
 }
 
-func initialModel() model {
-	cwd, _ := os.Getwd()
-	root, _ := buildFileTree(cwd)
+func initialModel(startPath string) model {
+	path, err := filepath.Abs(startPath)
+	if err != nil {
+		// Fallback if the path is weird
+		path, _ = os.Getwd()
+	}
+	root, _ := buildFileTree(path)
 
 	return model{
 		root:         root,
@@ -260,7 +264,7 @@ func (m model) View() string {
 			line = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line)
 		}
 
-		s.WriteString(line+"\n")
+		s.WriteString(line + "\n")
 	}
 
 	m.viewport.SetContent(s.String())
@@ -270,7 +274,11 @@ func (m model) View() string {
 }
 
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	startPath := "."
+	if len(os.Args) > 1 {
+		startPath = os.Args[1]
+	}
+	p := tea.NewProgram(initialModel(startPath), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)
 		os.Exit(1)
