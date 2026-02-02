@@ -1,8 +1,6 @@
 package main
 
-// logging
 import (
-	// "github.com/davecgh/go-spew/spew"
 	"log"
 )
 
@@ -29,7 +27,7 @@ var (
 
 	tokenStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#5A5A5A")). // Dark Grey
+			Background(lipgloss.Color("#5A5A5A")). 
 			Padding(0, 1)
 
 	keyStyle = lipgloss.NewStyle().
@@ -67,8 +65,6 @@ var (
 				MarginRight(3)
 )
 
-// --- 1. DATA STRUCTURES ---
-
 type FileNode struct {
 	Name     string
 	Path     string
@@ -76,9 +72,8 @@ type FileNode struct {
 	IsBinary bool
 	Size     int64
 	Children []*FileNode
-	Parent   *FileNode // Back-reference helper
+	Parent   *FileNode 
 
-	// State
 	Expanded     bool
 	Selected     bool
 	SomeSelected bool
@@ -92,7 +87,6 @@ func (n *FileNode) SetSelectParentFromChild(selected bool) {
 
 	if selected == true {
 		if n.Parent.Selected == false {
-			//check all children
 
 			allSelected := true
 			for _, node := range n.Parent.Children {
@@ -116,7 +110,6 @@ func (n *FileNode) SetSelectParentFromChild(selected bool) {
 		}
 	} else {
 		if n.Parent.Selected == true || n.Parent.SomeSelected == true {
-			//check all children
 
 			allNotSelected := true
 			for _, node := range n.Parent.Children {
@@ -142,7 +135,6 @@ func (n *FileNode) SetSelectParentFromChild(selected bool) {
 
 }
 
-// Recursive function to select/deselect a node and all its children
 func (n *FileNode) SetSelected(selected bool) {
 	emptyDir := n.IsDir && len(n.Children) == 0
 	if n.IsBinary || emptyDir {
@@ -155,25 +147,21 @@ func (n *FileNode) SetSelected(selected bool) {
 	n.SetSelectParentFromChild(selected)
 }
 
-// Toggle expansion (only for directories)
 func (n *FileNode) ToggleExpand() {
 	if n.IsDir {
 		n.Expanded = !n.Expanded
 	}
 }
 
-// --- 2. FILE SYSTEM SCANNER ---
-
 func buildFileTree(rootPath string) (*FileNode, error) {
 	root := &FileNode{
 		Name:     rootPath,
 		Path:     rootPath,
 		IsDir:    true,
-		Expanded: true, // Start with root open
+		Expanded: true, 
 		Depth:    0,
 	}
 
-	// Walk the directory
 	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -182,17 +170,13 @@ func buildFileTree(rootPath string) (*FileNode, error) {
 			return nil
 		}
 
-		// Simple ignore logic (add your gitignore logic here later)
-		if strings.Contains(path, ".git") || strings.Contains(path, ".punjado")|| strings.Contains(path, "node_modules") {
+		if strings.Contains(path, ".git") || strings.Contains(path, ".punjado") || strings.Contains(path, "node_modules") {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// Find parent
-		// This is a naive implementation (re-traversing from root).
-		// For massive repos, a map lookup is faster, but this works fine for <5000 files.
 		parentDir := filepath.Dir(path)
 		parent := findNode(root, parentDir)
 
@@ -224,7 +208,6 @@ func buildFileTree(rootPath string) (*FileNode, error) {
 	return root, err
 }
 
-// Helper to find a node by path
 func findNode(root *FileNode, path string) *FileNode {
 	if root.Path == path {
 		return root
@@ -238,12 +221,8 @@ func findNode(root *FileNode, path string) *FileNode {
 	return nil
 }
 
-// --- 3. FLATTENER (The Magic) ---
-// Turns the tree into a simple list of "Visible Items" based on what is expanded
 func flattenVisible(root *FileNode) []*FileNode {
 	var result []*FileNode
-	// We do not add the root folder itself to the list to save space,
-	// or you can add it if you want. Let's add the root's children.
 
 	var traverse func(n *FileNode)
 	traverse = func(n *FileNode) {
@@ -255,7 +234,6 @@ func flattenVisible(root *FileNode) []*FileNode {
 		}
 	}
 
-	// Start with root children so we don't see "." as the first item
 	if root.Expanded {
 		for _, child := range root.Children {
 			traverse(child)
@@ -270,11 +248,9 @@ func flattenVisible(root *FileNode) []*FileNode {
 	return result
 }
 
-// --- 4. MODEL ---
-
 type model struct {
 	root         *FileNode
-	visibleNodes []*FileNode // The currently rendered list
+	visibleNodes []*FileNode 
 	cursor       int
 	viewport     viewport.Model
 	ready        bool
@@ -285,7 +261,7 @@ type model struct {
 func initialModel(startPath string) model {
 	path, err := filepath.Abs(startPath)
 	if err != nil {
-		// Fallback if the path is weird
+
 		path, _ = os.Getwd()
 	}
 	root, _ := buildFileTree(path)
@@ -310,7 +286,7 @@ func (m model) renderContent() string {
 
 		emptyDir := node.IsDir && len(node.Children) == 0
 		notEmptyDir := node.IsDir && len(node.Children) > 0
-		// 3. Icon
+
 		icon := ""
 		if notEmptyDir {
 			if node.Expanded {
@@ -328,10 +304,8 @@ func (m model) renderContent() string {
 			dirAddon = "/"
 		}
 
-		// 4. Indentation
 		indent := strings.Repeat("  ", node.Depth)
 
-		// 5. Build Line
 		line := fmt.Sprintf("%s %s %s%s %s", indent, icon, node.Name, dirAddon, addon)
 
 		style := binFileStyle
@@ -344,7 +318,6 @@ func (m model) renderContent() string {
 			style = textFileStyle
 		}
 
-		// Highlight
 		if m.cursor == i {
 			style = style.Width(m.viewport.Width).Background(lipgloss.Color("#444"))
 		}
@@ -364,7 +337,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.width = msg.Width
 		headerHeight := 1
-		footerHeight := 1 // Adjust if you add a footer
+		footerHeight := 1 
 		verticalMargin := headerHeight + footerHeight
 
 		if !m.ready {
@@ -385,7 +358,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor > 0 {
 				m.cursor--
 			}
-			// Sync Viewport Scroll
+
 			if m.cursor < m.viewport.YOffset {
 				m.viewport.SetYOffset(m.cursor)
 			}
@@ -394,7 +367,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.visibleNodes)-1 {
 				m.cursor++
 			}
-			// Sync Viewport Scroll
+
 			if m.cursor >= m.viewport.YOffset+m.viewport.Height {
 				m.viewport.SetYOffset(m.viewport.YOffset + 1)
 			}
@@ -464,7 +437,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.visibleNodes = flattenVisible(m.root)
 		case "y":
 
-		case " ", "s": // Added enter for selection too if you like
+		case " ", "s": 
 			node := m.visibleNodes[m.cursor]
 			if node.IsBinary {
 				return m, nil
@@ -475,8 +448,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	saveState(m.root, m.root.Path)
-	// CRITICAL FIX: Set the content inside Update
-	// This saves the "lines" into the viewport model that gets returned
+
 	m.viewport.SetContent(m.renderContent())
 
 	return m, nil
@@ -486,43 +458,36 @@ func (m model) ToClipboard() {
 
 }
 
-// --- VIEW ---
 func (m model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
-	// View is now dumb: just print the header and the viewport
+
 	return fmt.Sprintf("%s%s%s", m.ViewHeader(), m.viewport.View(), m.ViewFooter())
 }
 
 func (m model) ViewHeader() string {
 	title := "Punjado"
 
-	// Calculate tokens
 	count := m.countSelectedTokens()
 	tokenText := fmt.Sprintf("%d tokens", count)
 
-	// Change color if too large (>32k)
 	style := tokenStyle
 	if count > 32000 {
-		style = style.Background(lipgloss.Color("#E03A3E")) // Red warning
+		style = style.Background(lipgloss.Color("#E03A3E")) 
 	}
 
-	// Calculate space between title and tokens
-	// m.width is the total terminal width we saved in Update
-	// We subtract the length of our text to know how many spaces to add
-	w := m.width - lipgloss.Width(title) - lipgloss.Width(tokenText) - 4 // -4 for padding safety
+	w := m.width - lipgloss.Width(title) - lipgloss.Width(tokenText) - 4 
 	if w < 0 {
 		w = 0
 	}
 	spacer := strings.Repeat(" ", w)
 
-	// Render: [Title] [Spacer] [Tokens]
 	return headerStyle.Render(title) + spacer + style.Render(tokenText) + "\n"
 }
 
 func (m model) ViewFooter() string {
-	// Helper to make a key:value pair
+
 	key := func(k, desc string) string {
 		return keyStyle.Render(k) + descStyle.Render(desc)
 	}
@@ -539,15 +504,13 @@ func (m model) ViewFooter() string {
 func (m model) countSelectedTokens() int {
 	var totalSize int64
 
-	// Recursive helper
 	var traverse func(n *FileNode)
 	traverse = func(n *FileNode) {
-		// If it's a file and it's selected, add its size
+
 		if !n.IsDir && n.Selected {
 			totalSize += n.Size
 		}
-		// Always check children (even if parent isn't selected,
-		// logic might allow partial selection later)
+
 		for _, child := range n.Children {
 			traverse(child)
 		}
@@ -555,24 +518,17 @@ func (m model) countSelectedTokens() int {
 
 	traverse(m.root)
 
-	// Heuristic: 1 token ~= 4 bytes
 	return int(totalSize / 4)
 }
-
-// --- PERSISTENCE ---
 
 func saveState(root *FileNode, rootPath string) {
 	var selectedPaths []string
 
-	// 1. Collect all selected paths
 	var traverse func(n *FileNode)
 	traverse = func(n *FileNode) {
-		// We only save specific selected items.
-		// If a folder is selected, saving the folder path is enough
-		// if your loading logic re-selects children.
-		// However, saving LEAF nodes (files) is the safest and most robust way.
+
 		if n.Selected && !n.IsDir {
-			// Save relative path to make it portable
+
 			rel, err := filepath.Rel(rootPath, n.Path)
 			if err == nil {
 				selectedPaths = append(selectedPaths, rel)
@@ -584,7 +540,6 @@ func saveState(root *FileNode, rootPath string) {
 	}
 	traverse(root)
 
-	// 2. Write to .punjado
 	saveFile := filepath.Join(rootPath, ".punjado")
 	content := strings.Join(selectedPaths, "\n")
 	os.WriteFile(saveFile, []byte(content), 0644)
@@ -594,10 +549,9 @@ func loadState(root *FileNode, rootPath string) {
 	saveFile := filepath.Join(rootPath, ".punjado")
 	data, err := os.ReadFile(saveFile)
 	if err != nil {
-		return // No save file, just start fresh
+		return 
 	}
 
-	// 1. Load paths into a map for fast lookup
 	selectedMap := make(map[string]bool)
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
@@ -606,13 +560,11 @@ func loadState(root *FileNode, rootPath string) {
 		}
 	}
 
-	// 2. Walk the tree and re-select
 	var traverse func(n *FileNode)
 	traverse = func(n *FileNode) {
 		rel, _ := filepath.Rel(rootPath, n.Path)
 		if selectedMap[rel] {
-			// logic: just mark it selected.
-			// Your SetSelected logic will handle parents automatically.
+
 			n.SetSelected(true)
 		}
 
@@ -624,24 +576,22 @@ func loadState(root *FileNode, rootPath string) {
 }
 
 func isBinaryFile(path string) bool {
-	// 1. Fast Path: Check common extensions to avoid disk I/O
+
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
-	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", // Images
-		".pdf", ".zip", ".tar", ".gz", ".7z", ".rar", // Archives
-		".exe", ".dll", ".so", ".dylib", ".bin", // Executables
-		".mp3", ".mp4", ".wav", ".avi", ".mov": // Media
+	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", 
+		".pdf", ".zip", ".tar", ".gz", ".7z", ".rar", 
+		".exe", ".dll", ".so", ".dylib", ".bin", 
+		".mp3", ".mp4", ".wav", ".avi", ".mov": 
 		return true
 	}
 
-	// 2. Slow Path: Read the first 512 bytes
 	f, err := os.Open(path)
 	if err != nil {
-		return false // If we can't read it, assume it's text (or handle error)
+		return false 
 	}
 	defer f.Close()
 
-	// Read up to 512 bytes
 	buf := make([]byte, 512)
 	n, err := f.Read(buf)
 	if err != nil && err != io.EOF {
