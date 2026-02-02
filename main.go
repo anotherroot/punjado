@@ -27,7 +27,7 @@ var (
 
 	tokenStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#5A5A5A")). 
+			Background(lipgloss.Color("#5A5A5A")).
 			Padding(0, 1)
 
 	keyStyle = lipgloss.NewStyle().
@@ -72,7 +72,7 @@ type FileNode struct {
 	IsBinary bool
 	Size     int64
 	Children []*FileNode
-	Parent   *FileNode 
+	Parent   *FileNode
 
 	Expanded     bool
 	Selected     bool
@@ -158,7 +158,7 @@ func buildFileTree(rootPath string) (*FileNode, error) {
 		Name:     rootPath,
 		Path:     rootPath,
 		IsDir:    true,
-		Expanded: true, 
+		Expanded: true,
 		Depth:    0,
 	}
 
@@ -250,12 +250,14 @@ func flattenVisible(root *FileNode) []*FileNode {
 
 type model struct {
 	root         *FileNode
-	visibleNodes []*FileNode 
+	visibleNodes []*FileNode
 	cursor       int
 	viewport     viewport.Model
 	ready        bool
 	height       int
 	width        int
+	helpMode     bool
+	selectedMode bool
 }
 
 func initialModel(startPath string) model {
@@ -337,7 +339,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.width = msg.Width
 		headerHeight := 1
-		footerHeight := 1 
+		footerHeight := 1
+		if m.helpMode {
+			footerHeight = 10
+		}
 		verticalMargin := headerHeight + footerHeight
 
 		if !m.ready {
@@ -351,6 +356,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
+
+		case "?":
+			m.helpMode = !m.helpMode
+			headerHeight := 1
+			footerHeight := 1
+			if m.helpMode {
+				footerHeight = 10
+			}
+			m.viewport.Height = m.height - headerHeight - footerHeight
+		case "esc":
+			if m.helpMode {
+				m.helpMode = !m.helpMode
+				headerHeight := 1
+				footerHeight := 2
+				if m.helpMode {
+					footerHeight = 10
+				}
+				m.viewport.Height = m.height - headerHeight - footerHeight
+			}
 		case "ctrl+c", "q":
 			return m, tea.Quit
 
@@ -437,7 +461,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.visibleNodes = flattenVisible(m.root)
 		case "y":
 
-		case " ", "s": 
+		case "S":
+			m.selectedMode = !m.selectedMode
+
+		case " ", "s":
 			node := m.visibleNodes[m.cursor]
 			if node.IsBinary {
 				return m, nil
@@ -462,8 +489,12 @@ func (m model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
+	footer := m.ViewFooter()
+	if m.helpMode {
+		footer = m.ViewExpandedHelp()
+	}
 
-	return fmt.Sprintf("%s%s%s", m.ViewHeader(), m.viewport.View(), m.ViewFooter())
+	return fmt.Sprintf("%s%s%s", m.ViewHeader(), m.viewport.View(), footer)
 }
 
 func (m model) ViewHeader() string {
@@ -474,16 +505,80 @@ func (m model) ViewHeader() string {
 
 	style := tokenStyle
 	if count > 32000 {
-		style = style.Background(lipgloss.Color("#E03A3E")) 
+		style = style.Background(lipgloss.Color("#E03A3E"))
 	}
 
-	w := m.width - lipgloss.Width(title) - lipgloss.Width(tokenText) - 4 
+	w := m.width - lipgloss.Width(title) - lipgloss.Width(tokenText) - 4
 	if w < 0 {
 		w = 0
 	}
 	spacer := strings.Repeat(" ", w)
 
 	return headerStyle.Render(title) + spacer + style.Render(tokenText) + "\n"
+}
+
+func (m model) ViewExpandedHelp() string {
+	// Define styles
+	colStyle := lipgloss.NewStyle().MarginRight(4).Foreground(lipgloss.Color("#A0A0A0"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FAFAFA")).MarginBottom(1)
+
+	// Create a dedicated style for the separator line (Subtle Grey)
+	separatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+
+	// Helper to format a single command group
+	group := func(title string, keys ...string) string {
+		lines := []string{titleStyle.Render(title)}
+		for i := 0; i < len(keys); i += 2 {
+			k := keyStyle.Render(keys[i])
+			desc := descStyle.Render(keys[i+1])
+			lines = append(lines, fmt.Sprintf("%s %s", k, desc))
+		}
+		return colStyle.Render(strings.Join(lines, "\n"))
+	}
+
+	// Create columns (same as before)
+	col1 := group("NAVIGATION",
+		"k/↑", "Up",
+		"j/↓", "Down",
+		"u", "Page Up",
+		"d", "Page Down",
+		"g", "Go to Top",
+		"G", "Go to Bottom",
+	)
+
+	col2 := group("SELECTION",
+		"space", "Toggle Dir",
+		"s", "Select File",
+		"enter", "Open Dir",
+		"a", "Toggle All",
+	)
+
+	col3 := group("ACTIONS",
+		"T", "Expand All",
+		"y", "Copy",
+		"q", "Quit",
+		"?", "Close Help",
+	)
+
+	// --- NEW LOGIC: Create the Full-Width Header ---
+
+	prefix := "─── Help "
+
+	// Calculate how many dashes we need
+	// We use m.width (saved in Update) to know the terminal size
+	dashCount := m.width - len([]rune(prefix)) // Use []rune for accurate length
+
+	// Safety check: avoid negative count if screen is tiny
+	if dashCount < 0 {
+		dashCount = 0
+	}
+
+	// Build the line: "--- Help " + "--------------------"
+	headerLine := separatorStyle.Render(prefix + strings.Repeat("─", dashCount) + "\n")
+
+	// Combine: [Newline] + [Header Line] + [Columns]
+	columns := lipgloss.JoinHorizontal(lipgloss.Top, col1, col2, col3)
+	return "\n" + headerLine + "\n" + columns + "\n"
 }
 
 func (m model) ViewFooter() string {
@@ -549,7 +644,7 @@ func loadState(root *FileNode, rootPath string) {
 	saveFile := filepath.Join(rootPath, ".punjado")
 	data, err := os.ReadFile(saveFile)
 	if err != nil {
-		return 
+		return
 	}
 
 	selectedMap := make(map[string]bool)
@@ -579,16 +674,16 @@ func isBinaryFile(path string) bool {
 
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
-	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", 
-		".pdf", ".zip", ".tar", ".gz", ".7z", ".rar", 
-		".exe", ".dll", ".so", ".dylib", ".bin", 
-		".mp3", ".mp4", ".wav", ".avi", ".mov": 
+	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp",
+		".pdf", ".zip", ".tar", ".gz", ".7z", ".rar",
+		".exe", ".dll", ".so", ".dylib", ".bin",
+		".mp3", ".mp4", ".wav", ".avi", ".mov":
 		return true
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return false 
+		return false
 	}
 	defer f.Close()
 
@@ -606,6 +701,47 @@ func isBinaryFile(path string) bool {
 	return false
 }
 
+func RunTUI(startPath string) {
+	log.Printf("Starting Punjado TUI at '%s'!!", startPath)
+	p := tea.NewProgram(initialModel(startPath), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Error: %v", err)
+		os.Exit(1)
+	}
+}
+
+func HandleAdd(fileNames []string) {
+	log.Printf("HandleAdd(%+v)", fileNames)
+}
+
+func HandleRemove() {
+	fmt.Printf("Error: HandleRemove not implemented")
+}
+
+func HandleCopy() {
+	fmt.Printf("Error: HandleCopy not implemented")
+}
+
+func HandleProfile() {
+	fmt.Printf("Error: HandleProfile not implemented")
+}
+
+func HandleToggle() {
+	fmt.Printf("Error: HandleToggle not implemented")
+}
+
+func HandleGit() {
+	fmt.Printf("Error: HandleGit not implemented")
+}
+
+func HandleList() {
+	fmt.Printf("Error: HandleList not implemented")
+}
+
+func HandleHelp() {
+	fmt.Printf("Error: help not implemented")
+}
+
 func main() {
 	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
@@ -614,17 +750,50 @@ func main() {
 	}
 	defer f.Close()
 
-	log.Println()
-	log.Println("Starting Punjado!!")
-	log.Println()
-
-	startPath := "."
-	if len(os.Args) > 1 {
-		startPath = os.Args[1]
+	if len(os.Args) < 2 {
+		RunTUI(".")
 	}
-	p := tea.NewProgram(initialModel(startPath), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("Error: %v", err)
-		os.Exit(1)
+	log.Printf("os.Args: %+v",os.Args)
+
+	switch os.Args[1] {
+	case "open":
+		startPath := "."
+		if len(os.Args) > 2 {
+			startPath = os.Args[2]
+		}
+		RunTUI(startPath)
+
+	case "add":
+		fileNames := os.Args[2:]
+		if len(fileNames) < 1 {
+			fmt.Printf("No file passed to command")
+			return
+		}
+		HandleAdd(fileNames)
+
+	case "list":
+		HandleList()
+
+	case "remove":
+		HandleRemove()
+
+	case "git":
+		HandleGit()
+
+	case "toggle":
+		HandleToggle()
+
+	case "profile":
+		HandleProfile()
+
+	case "copy":
+		HandleCopy()
+
+	case "help":
+		HandleHelp()
+
+	default:
+		HandleHelp()
+
 	}
 }
