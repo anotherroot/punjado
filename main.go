@@ -50,6 +50,10 @@ var (
 			Foreground(lipgloss.Color("#909090")).
 			MarginRight(3)
 
+	emptyDirStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#909090")).
+			MarginRight(3)
+
 	textFileStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
 			MarginRight(3)
@@ -61,7 +65,6 @@ var (
 	someSelectedStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#ffa000")).
 				MarginRight(3)
-
 )
 
 // --- 1. DATA STRUCTURES ---
@@ -86,50 +89,63 @@ func (n *FileNode) SetSelectParentFromChild(selected bool) {
 	if n.Parent == nil {
 		return
 	}
-	
-	if selected == true{
-		if n.Parent.Selected == false{
+
+	if selected == true {
+		if n.Parent.Selected == false {
 			//check all children
 
 			allSelected := true
-			for _, node := range n.Parent.Children{
-				if node.Selected == false{
+			for _, node := range n.Parent.Children {
+
+				emptyDir := node.IsDir && len(node.Children) == 0
+				if node.IsBinary || emptyDir {
+					continue
+				}
+				if node.Selected == false {
 					allSelected = false
-					break;
+					break
 				}
 			}
 			if allSelected {
-				n.Parent.SomeSelected = false;
-				n.Parent.Selected = true;
-			} else{
-				n.Parent.SomeSelected = true;
+				n.Parent.SomeSelected = false
+				n.Parent.Selected = true
+			} else {
+				n.Parent.SomeSelected = true
 			}
 		}
-	} else{
-		if n.Parent.Selected == true || n.Parent.SomeSelected == true{
+	} else {
+		if n.Parent.Selected == true || n.Parent.SomeSelected == true {
 			//check all children
 
 			allNotSelected := true
-			for _, node := range n.Parent.Children{
-				if node.Selected == true{
+			for _, node := range n.Parent.Children {
+				emptyDir := node.IsDir && len(node.Children) == 0
+				if node.IsBinary || emptyDir {
+					continue
+				}
+				if node.Selected == true {
 					allNotSelected = false
-					break;
+					break
 				}
 			}
 			if allNotSelected {
-				n.Parent.Selected = false;
-				n.Parent.SomeSelected = false;
-			} else{
-				n.Parent.SomeSelected = true;
-				n.Parent.Selected = false;
+				n.Parent.Selected = false
+				n.Parent.SomeSelected = false
+			} else {
+				n.Parent.SomeSelected = true
+				n.Parent.Selected = false
 			}
 		}
 	}
 
-
 }
+
 // Recursive function to select/deselect a node and all its children
 func (n *FileNode) SetSelected(selected bool) {
+	emptyDir := n.IsDir && len(n.Children) == 0
+	if n.IsBinary || emptyDir {
+		return
+	}
 	n.Selected = selected
 	for _, child := range n.Children {
 		child.SetSelected(selected)
@@ -196,7 +212,7 @@ func buildFileTree(rootPath string) (*FileNode, error) {
 				IsDir:    d.IsDir(),
 				Parent:   parent,
 				Depth:    parent.Depth + 1,
-				Expanded: false, // Subfolders start closed
+				Expanded: true,
 			}
 			parent.Children = append(parent.Children, node)
 		}
@@ -288,21 +304,31 @@ func (m model) renderContent() string {
 
 	for i, node := range m.visibleNodes {
 
+		emptyDir := node.IsDir && len(node.Children) == 0
+		notEmptyDir := node.IsDir && len(node.Children) > 0
 		// 3. Icon
 		icon := ""
-		if node.IsDir {
+		if notEmptyDir {
 			if node.Expanded {
 				icon = "▼"
 			} else {
 				icon = "▶"
 			}
 		}
+		addon := ""
+		if node.IsBinary {
+			addon = "(bin)"
+		}
+		dirAddon := ""
+		if node.IsDir {
+			dirAddon = "/"
+		}
 
 		// 4. Indentation
 		indent := strings.Repeat("  ", node.Depth)
 
 		// 5. Build Line
-		line := fmt.Sprintf("%s %s %s", indent, icon, node.Name)
+		line := fmt.Sprintf("%s %s %s%s %s", indent, icon, node.Name, dirAddon, addon)
 
 		style := binFileStyle
 
@@ -310,7 +336,7 @@ func (m model) renderContent() string {
 			style = selectedFileStyle
 		} else if node.SomeSelected {
 			style = someSelectedStyle
-		} else if !node.IsBinary{
+		} else if !node.IsBinary && !emptyDir {
 			style = textFileStyle
 		}
 
@@ -390,6 +416,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "a":
 			allNodesSelected := true
 			for _, node := range m.visibleNodes {
+
+				emptyDir := node.IsDir && len(node.Children) == 0
+				if node.IsBinary || emptyDir {
+					continue
+				}
 				if node.Selected != true {
 					allNodesSelected = false
 					break
@@ -397,6 +428,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			for _, node := range m.visibleNodes {
+				emptyDir := node.IsDir && len(node.Children) == 0
+				if node.IsBinary || emptyDir {
+					continue
+				}
 				if allNodesSelected {
 					node.SetSelected(false)
 				} else {
