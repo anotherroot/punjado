@@ -112,6 +112,7 @@ func (n *FileNode) SetSelectParentFromChild(selected bool) {
 			} else {
 				n.Parent.SomeSelected = true
 			}
+			n.Parent.SetSelectParentFromChild(selected)
 		}
 	} else {
 		if n.Parent.Selected == true || n.Parent.SomeSelected == true {
@@ -136,6 +137,7 @@ func (n *FileNode) SetSelectParentFromChild(selected bool) {
 				n.Parent.Selected = false
 			}
 		}
+		n.Parent.SetSelectParentFromChild(selected)
 	}
 
 }
@@ -181,7 +183,7 @@ func buildFileTree(rootPath string) (*FileNode, error) {
 		}
 
 		// Simple ignore logic (add your gitignore logic here later)
-		if strings.Contains(path, ".git") || strings.Contains(path, "node_modules") {
+		if strings.Contains(path, ".git") || strings.Contains(path, ".punjado")|| strings.Contains(path, "node_modules") {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -287,6 +289,8 @@ func initialModel(startPath string) model {
 		path, _ = os.Getwd()
 	}
 	root, _ := buildFileTree(path)
+
+	loadState(root, path)
 
 	return model{
 		root:         root,
@@ -470,6 +474,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	saveState(m.root, m.root.Path)
 	// CRITICAL FIX: Set the content inside Update
 	// This saves the "lines" into the viewport model that gets returned
 	m.viewport.SetContent(m.renderContent())
@@ -552,6 +557,70 @@ func (m model) countSelectedTokens() int {
 
 	// Heuristic: 1 token ~= 4 bytes
 	return int(totalSize / 4)
+}
+
+// --- PERSISTENCE ---
+
+func saveState(root *FileNode, rootPath string) {
+	var selectedPaths []string
+
+	// 1. Collect all selected paths
+	var traverse func(n *FileNode)
+	traverse = func(n *FileNode) {
+		// We only save specific selected items.
+		// If a folder is selected, saving the folder path is enough
+		// if your loading logic re-selects children.
+		// However, saving LEAF nodes (files) is the safest and most robust way.
+		if n.Selected && !n.IsDir {
+			// Save relative path to make it portable
+			rel, err := filepath.Rel(rootPath, n.Path)
+			if err == nil {
+				selectedPaths = append(selectedPaths, rel)
+			}
+		}
+		for _, child := range n.Children {
+			traverse(child)
+		}
+	}
+	traverse(root)
+
+	// 2. Write to .punjado
+	saveFile := filepath.Join(rootPath, ".punjado")
+	content := strings.Join(selectedPaths, "\n")
+	os.WriteFile(saveFile, []byte(content), 0644)
+}
+
+func loadState(root *FileNode, rootPath string) {
+	saveFile := filepath.Join(rootPath, ".punjado")
+	data, err := os.ReadFile(saveFile)
+	if err != nil {
+		return // No save file, just start fresh
+	}
+
+	// 1. Load paths into a map for fast lookup
+	selectedMap := make(map[string]bool)
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			selectedMap[line] = true
+		}
+	}
+
+	// 2. Walk the tree and re-select
+	var traverse func(n *FileNode)
+	traverse = func(n *FileNode) {
+		rel, _ := filepath.Rel(rootPath, n.Path)
+		if selectedMap[rel] {
+			// logic: just mark it selected.
+			// Your SetSelected logic will handle parents automatically.
+			n.SetSelected(true)
+		}
+
+		for _, child := range n.Children {
+			traverse(child)
+		}
+	}
+	traverse(root)
 }
 
 func isBinaryFile(path string) bool {

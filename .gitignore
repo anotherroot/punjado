@@ -32,3 +32,4 @@ go.work.sum
 # .vscode/
 .direnv
 debug.log
+test_project/.punjado
