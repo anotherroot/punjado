@@ -21,9 +21,9 @@ type item struct {
 func (i item) Title() string {
 	// The Trick: We change the visual title based on state
 	if i.selected {
-		return "[x] " + i.title
+		return i.title
 	}
-	return "[ ] " + i.title
+	return i.title
 }
 func (i item) Description() string { return i.desc }
 func (i item) FilterValue() string { return i.title } // What can we search for?
@@ -37,21 +37,21 @@ type model struct {
 func initialModel() model {
 	// Create some dummy files
 	files := []string{"README.md", "main.go", "flake.nix", "src/utils.go", "go.mod", "go.sum", ".gitignore"}
-	
+
 	// Convert strings to our 'item' struct
 	items := []list.Item{}
 	for _, file := range files {
 		items = append(items, item{title: file, desc: "File"})
 	}
 
-	// Setup the list component
-	// list.New(items, delegate, width, height)
 	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = false
+	delegate.SetSpacing(0)
 	l := list.New(items, delegate, 0, 0)
 	l.Title = "Punjado File Picker"
 	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(true)
-    // l.DisableQuitKeybindings() // Optional: if you want to handle q yourself logic fully
+	// l.DisableQuitKeybindings() // Optional: if you want to handle q yourself logic fully
 
 	return model{
 		list:     l,
@@ -66,7 +66,7 @@ func (m model) Init() tea.Cmd {
 // 3. UPDATE
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	
+
 	// Handle Window Resizing (Crucial for the list to look right)
 	case tea.WindowSizeMsg:
 		h, v := docStyle.GetFrameSize()
@@ -86,7 +86,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if ok {
 				// Toggle the selection in our map
 				// (We use the title as the key for now)
-				fileName := selectedItem.title 
+				fileName := selectedItem.title
 				if _, exists := m.selected[fileName]; exists {
 					delete(m.selected, fileName)
 					selectedItem.selected = false
