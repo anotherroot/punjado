@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"errors"
 )
 
 func isBinaryFile(path string) bool {
@@ -183,4 +184,17 @@ func ParseArgs() (string, []string, map[string]string, error) {
 
 	return exe, cmds, flags, nil
 
+}
+
+func FileExists(path string) bool {
+	if _, err := os.Stat(path); err == nil {
+		return true // File exists
+	} else if errors.Is(err, os.ErrNotExist) {
+		return false // File does not exist
+	} else {
+		// file may or may not exist. See err for details.
+		// usually strictly for "existence" checks, we return false here too, 
+        // or log the error (e.g. "Permission Denied")
+		return false 
+	}
 }

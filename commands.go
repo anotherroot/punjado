@@ -49,6 +49,13 @@ func HandleAdd(params []string, flags map[string]string) {
 	config := readConfig(dir)
 	for _, f := range params {
 		clean := filepath.Clean(f)
+
+		path := filepath.Join(dir, clean)
+		if !FileExists(path){
+			fmt.Printf("Error: File '%s' doesn't exist in directory '%s'", f, dir)
+			os.Exit(1)
+		}
+		
 		config[clean] = true
 		fmt.Printf("Added: %s\n", clean)
 	}
