@@ -33,3 +33,4 @@ go.work.sum
 .direnv
 debug.log
 test_project/.punjado
+.punjado
