@@ -10,7 +10,6 @@ import (
 	"github.com/atotto/clipboard"
 )
 
-
 func HandleRun(params []string, flags map[string]string) {
 	VarifyFlags(flags, []string{"help", "stdout", "dir"})
 
@@ -51,11 +50,11 @@ func HandleAdd(params []string, flags map[string]string) {
 		clean := filepath.Clean(f)
 
 		path := filepath.Join(dir, clean)
-		if !FileExists(path){
+		if !FileExists(path) {
 			fmt.Printf("Error: File '%s' doesn't exist in directory '%s'", f, dir)
 			os.Exit(1)
 		}
-		
+
 		config[clean] = true
 		fmt.Printf("Added: %s\n", clean)
 	}
@@ -97,7 +96,7 @@ func HandleCopy(params []string, flags map[string]string) {
 	var sb strings.Builder
 	for path := range config {
 		sb.WriteString(fmt.Sprintf("\n--- FILE: %s ---\n", path))
-		content, err := os.ReadFile(filepath.Join(dir,path))
+		content, err := os.ReadFile(filepath.Join(dir, path))
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("(Error reading file: %v)\n", err))
 		} else {
@@ -206,6 +205,32 @@ func HandleList(params []string, flags map[string]string) {
 	config := readConfig(dir)
 	for file := range config {
 		fmt.Println(file)
+	}
+}
+
+func HandleStatus(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for toggle....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+
+	if len(params) < 1 {
+		fmt.Println("Usage: punjado status <file>")
+		return
+	}
+
+	config := readConfig(dir)
+	for file := range config {
+		if file == params[0] {
+			fmt.Println(1)
+		} else {
+			fmt.Println(0)
+		}
+
 	}
 }
 

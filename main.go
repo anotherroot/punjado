@@ -48,12 +48,10 @@ func main() {
 	case "help":
 		HandleHelp(params, flags)
 
+	case "status":
+		HandleStatus(params, flags)
+
 	default:
-		// If argument is a path, open TUI
-		if _, err := os.Stat(os.Args[1]); err == nil {
-			RunTUI(os.Args[1])
-		} else {
-			HandleHelp(params, flags)
-		}
+		fmt.Printf("Command '%s' not recognised..\n", subcommand)
 	}
 }
