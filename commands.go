@@ -97,7 +97,7 @@ func HandleCopy(params []string, flags map[string]string) {
 	var sb strings.Builder
 	for path := range config {
 		sb.WriteString(fmt.Sprintf("\n--- FILE: %s ---\n", path))
-		content, err := os.ReadFile(path)
+		content, err := os.ReadFile(filepath.Join(dir,path))
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("(Error reading file: %v)\n", err))
 		} else {
