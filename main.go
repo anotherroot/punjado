@@ -1,19 +1,19 @@
 package main
 
 import (
-	"log"
-)
-
-import (
 	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/viewport"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -57,8 +57,8 @@ var (
 			MarginRight(3)
 
 	selectedFileStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6F6")).
-				MarginRight(3)
+				Foreground(lipgloss.Color("#B8BB26")).
+				MarginRight(3).Bold(true)
 
 	someSelectedStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#ffa000")).
@@ -518,14 +518,10 @@ func (m model) ViewHeader() string {
 }
 
 func (m model) ViewExpandedHelp() string {
-	// Define styles
 	colStyle := lipgloss.NewStyle().MarginRight(4).Foreground(lipgloss.Color("#A0A0A0"))
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FAFAFA")).MarginBottom(1)
-
-	// Create a dedicated style for the separator line (Subtle Grey)
 	separatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
 
-	// Helper to format a single command group
 	group := func(title string, keys ...string) string {
 		lines := []string{titleStyle.Render(title)}
 		for i := 0; i < len(keys); i += 2 {
@@ -536,7 +532,6 @@ func (m model) ViewExpandedHelp() string {
 		return colStyle.Render(strings.Join(lines, "\n"))
 	}
 
-	// Create columns (same as before)
 	col1 := group("NAVIGATION",
 		"k/↑", "Up",
 		"j/↓", "Down",
@@ -560,29 +555,17 @@ func (m model) ViewExpandedHelp() string {
 		"?", "Close Help",
 	)
 
-	// --- NEW LOGIC: Create the Full-Width Header ---
-
 	prefix := "─── Help "
-
-	// Calculate how many dashes we need
-	// We use m.width (saved in Update) to know the terminal size
-	dashCount := m.width - len([]rune(prefix)) // Use []rune for accurate length
-
-	// Safety check: avoid negative count if screen is tiny
+	dashCount := m.width - len([]rune(prefix))
 	if dashCount < 0 {
 		dashCount = 0
 	}
-
-	// Build the line: "--- Help " + "--------------------"
 	headerLine := separatorStyle.Render(prefix + strings.Repeat("─", dashCount) + "\n")
-
-	// Combine: [Newline] + [Header Line] + [Columns]
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, col1, col2, col3)
 	return "\n" + headerLine + "\n" + columns + "\n"
 }
 
 func (m model) ViewFooter() string {
-
 	key := func(k, desc string) string {
 		return keyStyle.Render(k) + descStyle.Render(desc)
 	}
@@ -598,32 +581,24 @@ func (m model) ViewFooter() string {
 
 func (m model) countSelectedTokens() int {
 	var totalSize int64
-
 	var traverse func(n *FileNode)
 	traverse = func(n *FileNode) {
-
 		if !n.IsDir && n.Selected {
 			totalSize += n.Size
 		}
-
 		for _, child := range n.Children {
 			traverse(child)
 		}
 	}
-
 	traverse(m.root)
-
 	return int(totalSize / 4)
 }
 
 func saveState(root *FileNode, rootPath string) {
 	var selectedPaths []string
-
 	var traverse func(n *FileNode)
 	traverse = func(n *FileNode) {
-
 		if n.Selected && !n.IsDir {
-
 			rel, err := filepath.Rel(rootPath, n.Path)
 			if err == nil {
 				selectedPaths = append(selectedPaths, rel)
@@ -634,7 +609,6 @@ func saveState(root *FileNode, rootPath string) {
 		}
 	}
 	traverse(root)
-
 	saveFile := filepath.Join(rootPath, ".punjado")
 	content := strings.Join(selectedPaths, "\n")
 	os.WriteFile(saveFile, []byte(content), 0644)
@@ -646,7 +620,6 @@ func loadState(root *FileNode, rootPath string) {
 	if err != nil {
 		return
 	}
-
 	selectedMap := make(map[string]bool)
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
@@ -654,15 +627,12 @@ func loadState(root *FileNode, rootPath string) {
 			selectedMap[line] = true
 		}
 	}
-
 	var traverse func(n *FileNode)
 	traverse = func(n *FileNode) {
 		rel, _ := filepath.Rel(rootPath, n.Path)
 		if selectedMap[rel] {
-
 			n.SetSelected(true)
 		}
-
 		for _, child := range n.Children {
 			traverse(child)
 		}
@@ -671,7 +641,6 @@ func loadState(root *FileNode, rootPath string) {
 }
 
 func isBinaryFile(path string) bool {
-
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp",
@@ -680,24 +649,20 @@ func isBinaryFile(path string) bool {
 		".mp3", ".mp4", ".wav", ".avi", ".mov":
 		return true
 	}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-
 	buf := make([]byte, 512)
 	n, err := f.Read(buf)
 	if err != nil && err != io.EOF {
 		return false
 	}
 	buf = buf[:n]
-
 	if bytes.IndexByte(buf, 0) != -1 {
 		return true
 	}
-
 	return false
 }
 
@@ -710,36 +675,359 @@ func RunTUI(startPath string) {
 	}
 }
 
-func HandleAdd(fileNames []string) {
-	log.Printf("HandleAdd(%+v)", fileNames)
+func readConfig(dir string) map[string]bool {
+	m := make(map[string]bool)
+	// Construct the full path: dir/.punjado
+	path := filepath.Join(dir, ".punjado")
+
+	data, _ := os.ReadFile(path)
+	for _, line := range strings.Split(string(data), "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			m[s] = true
+		}
+	}
+	return m
 }
 
-func HandleRemove() {
-	fmt.Printf("Error: HandleRemove not implemented")
+func writeConfig(dir string, m map[string]bool) {
+	var lines []string
+	for k := range m {
+		lines = append(lines, k)
+	}
+
+	path := filepath.Join(dir, ".punjado")
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 }
 
-func HandleCopy() {
-	fmt.Printf("Error: HandleCopy not implemented")
+func VarifyFlags(userFlags map[string]string, allowedList []string) {
+	// 1. Create a "Set" of allowed flags for fast lookup
+	// We use a map[string]bool because checking a map is instant
+	allowed := make(map[string]bool)
+	for _, flagName := range allowedList {
+		allowed[flagName] = true
+	}
+
+	// 2. Iterate over the flags the USER actually provided
+	for flagName := range userFlags {
+		// 3. Check if the user's flag exists in our allowed list
+		if !allowed[flagName] {
+			fmt.Printf("Error: unknown flag '--%s'\n", flagName)
+			fmt.Printf("Valid flags for this command are: %v\n", allowedList)
+			os.Exit(1) // Exit the program immediately
+		}
+	}
 }
 
-func HandleProfile() {
+func GetFlag(flags map[string]string, key, defaultVal string) string {
+	if val, ok := flags[key]; ok {
+		return val
+	}
+	return defaultVal
+}
+
+func HasFlag(flags map[string]string, key string) bool {
+	if _, ok := flags[key]; ok {
+		return true
+	}
+	return false
+}
+
+func HandleRun(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "stdout", "dir"})
+
+	if HasFlag(flags, "help") {
+		HandleHelp(params, flags)
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+	RunTUI(dir)
+}
+
+func HandleOpen(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "stdout", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for add....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+	RunTUI(dir)
+
+}
+
+func HandleAdd(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for add....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+
+	config := readConfig(dir)
+	for _, f := range params {
+		clean := filepath.Clean(f)
+		config[clean] = true
+		fmt.Printf("Added: %s\n", clean)
+	}
+	writeConfig(dir, config)
+}
+
+func HandleRemove(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for remove....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+
+	config := readConfig(dir)
+	for _, f := range params {
+		clean := filepath.Clean(f)
+		delete(config, clean)
+		fmt.Printf("Removed: %s\n", clean)
+	}
+	writeConfig(dir, config)
+}
+
+func HandleCopy(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir", "stdout"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for copy....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+
+	useStdOut := HasFlag(flags, "stdout")
+
+	config := readConfig(dir)
+	var sb strings.Builder
+	for path := range config {
+		sb.WriteString(fmt.Sprintf("\n--- FILE: %s ---\n", path))
+		content, err := os.ReadFile(path)
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("(Error reading file: %v)\n", err))
+		} else {
+			sb.Write(content)
+		}
+		sb.WriteString("\n")
+	}
+	finalText := sb.String()
+	if useStdOut {
+		fmt.Print(finalText)
+	} else {
+		err := clipboard.WriteAll(finalText)
+		if err != nil {
+			fmt.Println("Error copying to clipboard (install xclip/wl-copy on Linux):", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Copied %d files to clipboard!\n", len(config))
+	}
+}
+
+func HandleProfile(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for profile....")
+		return
+	}
+
+	// dir := GetFlag(flags, "dir", ".")
+
 	fmt.Printf("Error: HandleProfile not implemented")
 }
 
-func HandleToggle() {
-	fmt.Printf("Error: HandleToggle not implemented")
+func HandleToggle(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for toggle....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+
+	if len(params) < 1 {
+		fmt.Println("Usage: punjado toggle <file>")
+		return
+	}
+	config := readConfig(dir)
+	file := filepath.Clean(params[0])
+
+	if config[file] {
+		delete(config, file)
+		fmt.Printf("Removed: %s\n", file)
+	} else {
+		config[file] = true
+		fmt.Printf("Added: %s\n", file)
+	}
+	writeConfig(dir, config)
 }
 
-func HandleGit() {
-	fmt.Printf("Error: HandleGit not implemented")
+func HandleGit(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for toggle....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+
+	cmd := exec.Command("git", "status", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Println("Error running git status. Is this a git repo?")
+		os.Exit(1)
+	}
+	config := readConfig(dir)
+	lines := strings.Split(string(output), "\n")
+	count := 0
+	for _, line := range lines {
+		if len(line) < 4 {
+			continue
+		}
+		path := strings.TrimSpace(line[3:])
+		path = filepath.Clean(path)
+		if !config[path] {
+			config[path] = true
+			fmt.Printf("Git file added: %s\n", path)
+			count++
+		}
+	}
+	writeConfig(dir, config)
+	fmt.Printf("Successfully added %d files from git status.\n", count)
 }
 
-func HandleList() {
-	fmt.Printf("Error: HandleList not implemented")
+func HandleList(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for toggle....")
+		return
+	}
+
+	dir := GetFlag(flags, "dir", ".")
+
+	config := readConfig(dir)
+	for file := range config {
+		fmt.Println(file)
+	}
 }
 
-func HandleHelp() {
-	fmt.Printf("Error: help not implemented")
+func HandleHelp(params []string, flags map[string]string) {
+	fmt.Println(`Punjado - Context Manager
+
+Usage:
+  punjado [path]        Open TUI in directory
+  punjado open [path]   Open TUI in directory
+  punjado add <files>   Add files to context
+  punjado remove <files> Remove files from context
+  punjado toggle <file> Toggle file context
+  punjado list          List selected files
+  punjado copy          Copy context to clipboard (flags: --std)
+  punjado git           Add all changed git files`)
+}
+
+type Flag struct {
+	Long         string
+	Short        byte
+	HasParameter bool
+}
+
+func ParseArgs() (string, []string, map[string]string, error) {
+	validFlags := []Flag{
+		{
+			Long:         "dir",
+			Short:        'd',
+			HasParameter: true,
+		},
+		{
+			Long:         "stdout",
+			Short:        0,
+			HasParameter: false,
+		},
+		{
+			Long:         "version",
+			Short:        0,
+			HasParameter: false,
+		},
+		{
+			Long:         "help",
+			Short:        0,
+			HasParameter: false,
+		},
+	}
+
+	flagHasParameter := make(map[string]bool)
+	shortFlagHasParameter := make(map[byte]bool)
+	shortFlagToLongFlag := make(map[byte]string)
+
+	for _, f := range validFlags {
+		flagHasParameter[f.Long] = f.HasParameter
+
+		if f.Short != 0 {
+			shortFlagHasParameter[f.Short] = f.HasParameter
+			shortFlagToLongFlag[f.Short] = f.Long
+		}
+	}
+
+	exe := os.Args[0]
+
+	cmds := []string{}
+	flags := make(map[string]string)
+
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg[0:2] == "--" {
+			arg = arg[2:]
+			if val, ok := flagHasParameter[arg]; ok {
+				flagVal := ""
+				if val {
+					if len(os.Args) <= i+1 {
+						return "", nil, nil, fmt.Errorf("Flag '%s' requires a parameter", arg)
+					}
+					flagVal = os.Args[i+1]
+					i++
+				}
+				flags[arg] = flagVal
+			} else {
+				return "", nil, nil, fmt.Errorf("Flag '%s' is not recognised", arg)
+			}
+		} else if arg[0] == '-' {
+			arg = arg[1:]
+			for i := 0; i < len(arg); i++ {
+				c := arg[i]
+				if val, ok := shortFlagHasParameter[c]; ok {
+					flagVal := ""
+					if val {
+						if len(os.Args) <= i+1 {
+							return "", nil, nil, fmt.Errorf("Short flag '-%c' requires a parameter", c)
+						}
+						flagVal = os.Args[i+1]
+						i++
+					}
+					flags[shortFlagToLongFlag[c]] = flagVal
+				} else {
+					return "", nil, nil, fmt.Errorf("Short flag '-%c' is not recognised", c)
+				}
+
+			}
+		} else {
+			cmds = append(cmds, arg)
+		}
+	}
+
+	return exe, cmds, flags, nil
+
 }
 
 func main() {
@@ -750,50 +1038,53 @@ func main() {
 	}
 	defer f.Close()
 
-	if len(os.Args) < 2 {
-		RunTUI(".")
+	_, cmds, flags, err := ParseArgs()
+	if err != nil {
+		fmt.Println("fatal:", err)
+		os.Exit(1)
 	}
-	log.Printf("os.Args: %+v",os.Args)
 
-	switch os.Args[1] {
+	if len(cmds) == 0 && len(flags) == 0 {
+		HandleRun(cmds, flags)
+		return
+	}
+	subcommand := cmds[0]
+	params := cmds[1:]
+
+	switch subcommand {
 	case "open":
-		startPath := "."
-		if len(os.Args) > 2 {
-			startPath = os.Args[2]
-		}
-		RunTUI(startPath)
+		HandleOpen(params, flags)
 
 	case "add":
-		fileNames := os.Args[2:]
-		if len(fileNames) < 1 {
-			fmt.Printf("No file passed to command")
-			return
-		}
-		HandleAdd(fileNames)
+		HandleAdd(params, flags)
 
 	case "list":
-		HandleList()
+		HandleList(params, flags)
 
 	case "remove":
-		HandleRemove()
+		HandleRemove(params, flags)
 
 	case "git":
-		HandleGit()
+		HandleGit(params, flags)
 
 	case "toggle":
-		HandleToggle()
+		HandleToggle(params, flags)
 
 	case "profile":
-		HandleProfile()
+		HandleProfile(params, flags)
 
 	case "copy":
-		HandleCopy()
+		HandleCopy(params, flags)
 
 	case "help":
-		HandleHelp()
+		HandleHelp(params, flags)
 
 	default:
-		HandleHelp()
-
+		// If argument is a path, open TUI
+		if _, err := os.Stat(os.Args[1]); err == nil {
+			RunTUI(os.Args[1])
+		} else {
+			HandleHelp(params, flags)
+		}
 	}
 }
