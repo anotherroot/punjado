@@ -212,7 +212,7 @@ func HandleStatus(params []string, flags map[string]string) {
 	VarifyFlags(flags, []string{"help", "dir"})
 
 	if HasFlag(flags, "help") {
-		fmt.Printf("Help for toggle....")
+		fmt.Printf("Help for status....")
 		return
 	}
 
@@ -236,6 +236,21 @@ func HandleStatus(params []string, flags map[string]string) {
 	} else {
 		fmt.Println(0)
 	}
+}
+
+func HandleTokens(params []string, flags map[string]string) {
+	VarifyFlags(flags, []string{"help", "dir"})
+
+	if HasFlag(flags, "help") {
+		fmt.Printf("Help for tokens....")
+		return
+	}
+
+	// dir := GetFlag(flags, "dir", ".")
+
+
+	// config := readConfig(dir)
+	fmt.Printf("Not implemented")
 }
 
 func HandleHelp(params []string, flags map[string]string) {

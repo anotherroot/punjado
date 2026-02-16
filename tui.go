@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -407,13 +408,16 @@ func (m model) countSelectedTokens() int {
 }
 
 func RunTUI(startPath string) {
-	f, err := tea.LogToFile("debug.log", "debug")
-	if err != nil {
-		fmt.Println("fatal:", err)
-		os.Exit(1)
+	if os.Getenv("DEBUG") == "true" {
+		f, err := tea.LogToFile("debug.log", "debug")
+		if err != nil {
+			fmt.Println("fatal:", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+	} else {
+		log.SetOutput(io.Discard)
 	}
-	defer f.Close()
-
 
 	log.Printf("Starting Punjado TUI at '%s'!!", startPath)
 	p := tea.NewProgram(initialModel(startPath), tea.WithAltScreen())

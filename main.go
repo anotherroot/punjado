@@ -51,6 +51,9 @@ func main() {
 	case "status":
 		HandleStatus(params, flags)
 
+	case "tokens":
+		HandleTokens(params, flags)
+
 	default:
 		fmt.Printf("Command '%s' not recognised..\n", subcommand)
 	}

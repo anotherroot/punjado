@@ -1,4 +1,4 @@
-module github.com/anotherroot/punjado.git
+module github.com/anotherroot/punjado
 
 go 1.25.5
 
