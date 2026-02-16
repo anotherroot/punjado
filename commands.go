@@ -224,13 +224,17 @@ func HandleStatus(params []string, flags map[string]string) {
 	}
 
 	config := readConfig(dir)
+	exists := false
 	for file := range config {
 		if file == params[0] {
-			fmt.Println(1)
-		} else {
-			fmt.Println(0)
+			exists = true
+			break
 		}
-
+	}
+	if exists {
+		fmt.Println(1)
+	} else {
+		fmt.Println(0)
 	}
 }
 
