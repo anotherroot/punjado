@@ -1,2 +1,2 @@
 # punjado
-A TUI tool for copying a handful of files  in a AI friendly format 
+A TUI/CLI tool for copying a handful of files of a project in a AI friendly format.
