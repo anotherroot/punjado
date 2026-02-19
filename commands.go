@@ -1,268 +1,192 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-
-	"github.com/atotto/clipboard"
 )
 
-func HandleRun(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "stdout", "dir"})
 
-	if HasFlag(flags, "help") {
-		HandleHelp(params, flags)
-		return
-	}
-
-	dir := GetFlag(flags, "dir", ".")
-	RunTUI(dir)
+type Action struct {
+	Undo func()
+	Redo func()
 }
 
-func HandleOpen(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "stdout", "dir"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for add....")
-		return
-	}
-
-	dir := GetFlag(flags, "dir", ".")
-	RunTUI(dir)
-
+func (m model) commit(action Action) model {
+	action.Redo() 
+	
+	m.undoStack = append(m.undoStack, action)
+	m.redoStack = nil 
+	
+	saveState(m.root, m.root.Path)
+	return m
 }
 
-func HandleAdd(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
+func (m model) performUndo() model {
+	if len(m.undoStack) == 0 { return m }
 
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for add....")
-		return
-	}
+	lastIdx := len(m.undoStack) - 1
+	action := m.undoStack[lastIdx]
+	m.undoStack = m.undoStack[:lastIdx]
 
-	dir := GetFlag(flags, "dir", ".")
-
-	config := readConfig(dir)
-	for _, f := range params {
-		clean := filepath.Clean(f)
-
-		path := filepath.Join(dir, clean)
-		if !FileExists(path) {
-			fmt.Printf("Error: File '%s' doesn't exist in directory '%s'", f, dir)
-			os.Exit(1)
-		}
-
-		config[clean] = true
-		fmt.Printf("Added: %s\n", clean)
-	}
-	writeConfig(dir, config)
+	action.Undo()
+	m.redoStack = append(m.redoStack, action)
+	
+	saveState(m.root, m.root.Path)
+	return m
 }
 
-func HandleRemove(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
+func (m model) performRedo() model {
+	if len(m.redoStack) == 0 { return m }
 
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for remove....")
-		return
-	}
+	lastIdx := len(m.redoStack) - 1
+	action := m.redoStack[lastIdx]
+	m.redoStack = m.redoStack[:lastIdx]
 
-	dir := GetFlag(flags, "dir", ".")
-
-	config := readConfig(dir)
-	for _, f := range params {
-		clean := filepath.Clean(f)
-		delete(config, clean)
-		fmt.Printf("Removed: %s\n", clean)
-	}
-	writeConfig(dir, config)
+	action.Redo()
+	m.undoStack = append(m.undoStack, action)
+	
+	saveState(m.root, m.root.Path) 
+	return m
 }
 
-func HandleCopy(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir", "stdout"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for copy....")
-		return
+func (m model) toggleCurrentFile() model {
+	node := m.visibleNodes[m.cursor]
+	if node.IsBinary {
+		return m 
 	}
 
-	dir := GetFlag(flags, "dir", ".")
+	prevState := node.Selected
+	newState := !prevState
 
-	useStdOut := HasFlag(flags, "stdout")
+	action := Action{
+		Undo: func() { node.SetSelected(prevState) },
+		Redo: func() { node.SetSelected(newState) },
+	}
 
-	config := readConfig(dir)
-	var sb strings.Builder
-	for path := range config {
-		sb.WriteString(fmt.Sprintf("\n--- FILE: %s ---\n", path))
-		content, err := os.ReadFile(filepath.Join(dir, path))
-		if err != nil {
-			sb.WriteString(fmt.Sprintf("(Error reading file: %v)\n", err))
-		} else {
-			sb.Write(content)
-		}
-		sb.WriteString("\n")
-	}
-	finalText := sb.String()
-	if useStdOut {
-		fmt.Print(finalText)
-	} else {
-		err := clipboard.WriteAll(finalText)
-		if err != nil {
-			fmt.Println("Error copying to clipboard (install xclip/wl-copy on Linux):", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Copied %d files to clipboard!\n", len(config))
-	}
+	return m.commit(action)
 }
 
-func HandleProfile(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for profile....")
-		return
-	}
-
-	// dir := GetFlag(flags, "dir", ".")
-
-	fmt.Printf("Error: HandleProfile not implemented")
-}
-
-func HandleToggle(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for toggle....")
-		return
-	}
-
-	dir := GetFlag(flags, "dir", ".")
-
-	if len(params) < 1 {
-		fmt.Println("Usage: punjado toggle <file>")
-		return
-	}
-	config := readConfig(dir)
-	file := filepath.Clean(params[0])
-
-	if config[file] {
-		delete(config, file)
-		fmt.Printf("Removed: %s\n", file)
-	} else {
-		config[file] = true
-		fmt.Printf("Added: %s\n", file)
-	}
-	writeConfig(dir, config)
-}
-
-func HandleGit(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for toggle....")
-		return
-	}
-
-	dir := GetFlag(flags, "dir", ".")
-
-	cmd := exec.Command("git", "status", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		fmt.Println("Error running git status. Is this a git repo?")
-		os.Exit(1)
-	}
-	config := readConfig(dir)
-	lines := strings.Split(string(output), "\n")
-	count := 0
-	for _, line := range lines {
-		if len(line) < 4 {
-			continue
-		}
-		path := strings.TrimSpace(line[3:])
-		path = filepath.Clean(path)
-		if !config[path] {
-			config[path] = true
-			fmt.Printf("Git file added: %s\n", path)
-			count++
-		}
-	}
-	writeConfig(dir, config)
-	fmt.Printf("Successfully added %d files from git status.\n", count)
-}
-
-func HandleList(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for toggle....")
-		return
-	}
-
-	dir := GetFlag(flags, "dir", ".")
-
-	config := readConfig(dir)
-	for file := range config {
-		fmt.Println(file)
-	}
-}
-
-func HandleStatus(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for status....")
-		return
-	}
-
-	dir := GetFlag(flags, "dir", ".")
-
-	if len(params) < 1 {
-		fmt.Println("Usage: punjado status <file>")
-		return
-	}
-
-	config := readConfig(dir)
-	exists := false
-	for file := range config {
-		if file == params[0] {
-			exists = true
+func (m model) toggleAllFiles() model {
+	allSelected := true
+	for _, node := range m.visibleNodes {
+		emptyDir := node.IsDir && len(node.Children) == 0
+		if node.IsBinary || emptyDir { continue }
+		if !node.Selected {
+			allSelected = false
 			break
 		}
 	}
-	if exists {
-		fmt.Println(1)
-	} else {
-		fmt.Println(0)
-	}
-}
+	targetState := !allSelected
 
-func HandleTokens(params []string, flags map[string]string) {
-	VarifyFlags(flags, []string{"help", "dir"})
-
-	if HasFlag(flags, "help") {
-		fmt.Printf("Help for tokens....")
-		return
+	prevStates := make(map[*FileNode]bool)
+	for _, node := range m.visibleNodes {
+		prevStates[node] = node.Selected
 	}
 
-	// dir := GetFlag(flags, "dir", ".")
+	action := Action{
+		Undo: func() {
+			for node, oldState := range prevStates {
+				node.SetSelected(oldState)
+			}
+		},
+		Redo: func() {
+			for node := range prevStates {
+				emptyDir := node.IsDir && len(node.Children) == 0
+				if node.IsBinary || emptyDir { continue }
+				node.SetSelected(targetState)
+			}
+		},
+	}
 
-
-	// config := readConfig(dir)
-	fmt.Printf("Not implemented")
+	return m.commit(action)
 }
 
-func HandleHelp(params []string, flags map[string]string) {
-	fmt.Println(`Punjado - Context Manager
+func (m model) moveUp() model {
+	if m.cursor > 0 {
+		m.cursor--
+	}
+	if m.cursor < m.viewport.YOffset {
+		m.viewport.SetYOffset(m.cursor)
+	}
+	return m
+}
 
-Usage:
-  punjado [path]        Open TUI in directory
-  punjado open [path]   Open TUI in directory
-  punjado add <files>   Add files to context
-  punjado remove <files> Remove files from context
-  punjado toggle <file> Toggle file context
-  punjado list          List selected files
-  punjado copy          Copy context to clipboard (flags: --std)
-  punjado git           Add all changed git files`)
+func (m model) moveDown() model {
+	if m.cursor < len(m.visibleNodes)-1 {
+		m.cursor++
+	}
+	if m.cursor >= m.viewport.YOffset+m.viewport.Height {
+		m.viewport.SetYOffset(m.viewport.YOffset + 1)
+	}
+	return m
+}
+
+func (m model) pageUp() model {
+	m.viewport.PageUp()
+	m.cursor = max(m.cursor-m.viewport.Height, 0)
+	return m
+}
+
+func (m model) pageDown() model {
+	m.viewport.PageDown()
+	m.cursor = min(m.cursor+m.viewport.Height, len(m.visibleNodes)-1)
+	return m
+}
+
+func (m model) gotoTop() model {
+	m.cursor = 0
+	m.viewport.GotoTop()
+	return m
+}
+
+func (m model) gotoBottom() model {
+	m.cursor = len(m.visibleNodes) - 1
+	m.viewport.GotoBottom()
+	return m
+}
+
+func (m model) toggleHelp() model {
+	m.helpMode = !m.helpMode
+	headerHeight := 1
+	footerHeight := 1
+	if m.helpMode {
+		footerHeight = 10
+	}
+	m.viewport.Height = m.height - headerHeight - footerHeight
+	return m
+}
+
+func (m model) closeHelp() model {
+	if m.helpMode {
+		m.helpMode = false
+		headerHeight := 1
+		footerHeight := 2
+		m.viewport.Height = m.height - headerHeight - footerHeight
+	}
+	return m
+}
+
+func (m model) toggleDirectory() model {
+	node := m.visibleNodes[m.cursor]
+	if node.IsDir {
+		node.ToggleExpand()
+		m.visibleNodes = flattenVisible(m.root)
+	}
+	return m
+}
+
+func (m model) toggleExpandAll() model {
+	allNodesExpanded := true
+	for _, node := range m.visibleNodes {
+		if !node.Expanded && node.IsDir {
+			allNodesExpanded = false
+			break
+		}
+	}
+
+	for _, node := range m.visibleNodes {
+		if node.IsDir {
+			node.Expanded = !allNodesExpanded
+		}
+	}
+	m.visibleNodes = flattenVisible(m.root)
+	return m
 }

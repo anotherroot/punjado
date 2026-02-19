@@ -71,6 +71,9 @@ type model struct {
 	width        int
 	helpMode     bool
 	selectedMode bool
+
+	undoStack []Action
+	redoStack []Action
 }
 
 func initialModel(startPath string) model {
@@ -169,133 +172,53 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-
-		case "?":
-			m.helpMode = !m.helpMode
-			headerHeight := 1
-			footerHeight := 1
-			if m.helpMode {
-				footerHeight = 10
-			}
-			m.viewport.Height = m.height - headerHeight - footerHeight
-		case "esc":
-			if m.helpMode {
-				m.helpMode = !m.helpMode
-				headerHeight := 1
-				footerHeight := 2
-				if m.helpMode {
-					footerHeight = 10
-				}
-				m.viewport.Height = m.height - headerHeight - footerHeight
-			}
+		// --- App State ---
 		case "ctrl+c", "q":
 			return m, tea.Quit
 
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
+		// --- Undo / Redo (Domain State) ---
+		case "u":
+			m = m.performUndo()
+		case "ctrl+r":
+			m = m.performRedo()
 
-			if m.cursor < m.viewport.YOffset {
-				m.viewport.SetYOffset(m.cursor)
-			}
-
-		case "down", "j":
-			if m.cursor < len(m.visibleNodes)-1 {
-				m.cursor++
-			}
-
-			if m.cursor >= m.viewport.YOffset+m.viewport.Height {
-				m.viewport.SetYOffset(m.viewport.YOffset + 1)
-			}
-
-		case "enter":
-			node := m.visibleNodes[m.cursor]
-			if node.IsDir {
-				node.ToggleExpand()
-				m.visibleNodes = flattenVisible(m.root)
-			}
-		case "ctrl+d":
-			m.viewport.PageDown()
-			m.cursor = min(m.cursor+m.viewport.Height, len(m.visibleNodes)-1)
-		case "ctrl+u":
-			m.viewport.PageUp()
-			m.cursor = max(m.cursor-m.viewport.Height, 0)
-		case "g":
-			m.cursor = 0
-			m.viewport.GotoTop()
-		case "G":
-			m.cursor = len(m.visibleNodes) - 1
-			m.viewport.GotoBottom()
+		// --- Selection (Domain State) ---
+		case " ", "s":
+			m = m.toggleCurrentFile()
 		case "a":
-			allNodesSelected := true
-			for _, node := range m.visibleNodes {
+			m = m.toggleAllFiles()
 
-				emptyDir := node.IsDir && len(node.Children) == 0
-				if node.IsBinary || emptyDir {
-					continue
-				}
-				if node.Selected != true {
-					allNodesSelected = false
-					break
-				}
-			}
-
-			for _, node := range m.visibleNodes {
-				emptyDir := node.IsDir && len(node.Children) == 0
-				if node.IsBinary || emptyDir {
-					continue
-				}
-				if allNodesSelected {
-					node.SetSelected(false)
-				} else {
-					node.SetSelected(true)
-				}
-			}
+		// --- UI & Navigation (No Undo) ---
+		case "up", "k":
+			m = m.moveUp()
+		case "down", "j":
+			m = m.moveDown()
+		case "ctrl+u":
+			m = m.pageUp()
+		case "ctrl+d":
+			m = m.pageDown()
+		case "g":
+			m = m.gotoTop()
+		case "G":
+			m = m.gotoBottom()
+		case "enter":
+			m = m.toggleDirectory()
 		case "T":
-			allNodesExpanded := true
-			for _, node := range m.visibleNodes {
-				if node.Expanded != true && node.IsDir {
-					allNodesExpanded = false
-					break
-				}
-			}
-
-			for _, node := range m.visibleNodes {
-				if node.IsDir {
-					if allNodesExpanded {
-						node.Expanded = false
-					} else {
-						node.Expanded = true
-					}
-				}
-			}
-
-			m.visibleNodes = flattenVisible(m.root)
-		case "y":
-
+			m = m.toggleExpandAll()
 		case "S":
 			m.selectedMode = !m.selectedMode
-
-		case " ", "s":
-			node := m.visibleNodes[m.cursor]
-			if node.IsBinary {
-				return m, nil
-			}
-			newState := !node.Selected
-			node.SetSelected(newState)
+		case "?":
+			m = m.toggleHelp()
+		case "esc":
+			m = m.closeHelp()
+			// case "y":
+			// 	// Copy action (not implemented in TUI yet)
 		}
 	}
-
-	saveState(m.root, m.root.Path)
 
 	m.viewport.SetContent(m.renderContent())
 
 	return m, nil
-}
-
-func (m model) ToClipboard() {
-
 }
 
 func (m model) View() string {
