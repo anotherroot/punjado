@@ -74,6 +74,87 @@ type model struct {
 
 	undoStack []Action
 	redoStack []Action
+
+	keymaps map[string]Keymap
+
+	keySeq          string
+	filteredKeymaps map[string]Keymap
+}
+
+type Keymap struct {
+	keys   string
+	cmdKey string
+}
+
+const gotoBottomCmdKey = "gotoBottom"
+const gotoTopCmdKey = "gotoTop"
+const closeHelpCmdKey = "closeHelp"
+const toggleHelpCmdKey = "toggleHelp"
+const toggleDirectoryCmdKey = "toggleDirectory"
+const toggleAllCmdKey = "toggleAll"
+const toggleFileCmdKey = "toggleFile"
+const redoCmdKey = "redo"
+const undoCmdKey = "undo"
+const moveUpCmdKey = "moveUp"
+const moveDownCmdKey = "moveDown"
+
+var defaultKeymaps = []Keymap{
+	{keys: "j", cmdKey: moveDownCmdKey},
+	{keys: "<down>", cmdKey: moveDownCmdKey},
+	{keys: "k", cmdKey: moveUpCmdKey},
+	{keys: "<up>", cmdKey: moveUpCmdKey},
+	{keys: "u", cmdKey: undoCmdKey},
+	{keys: "<ctrl+r>", cmdKey: redoCmdKey},
+	{keys: " ", cmdKey: toggleFileCmdKey},
+	{keys: "s", cmdKey: toggleFileCmdKey},
+	{keys: "a", cmdKey: toggleAllCmdKey},
+	{keys: "<enter>", cmdKey: toggleDirectoryCmdKey},
+	{keys: "?", cmdKey: toggleHelpCmdKey},
+	{keys: "<esc>", cmdKey: closeHelpCmdKey},
+	{keys: "g", cmdKey: gotoTopCmdKey},
+	{keys: "G", cmdKey: gotoBottomCmdKey},
+}
+
+type CmdFunc func(model) model
+
+var commandRegistry = map[string]CmdFunc{
+	moveDownCmdKey:        model.moveDown,
+	moveUpCmdKey:          model.moveUp,
+	undoCmdKey:            model.performUndo,
+	redoCmdKey:            model.performRedo,
+	toggleFileCmdKey:      model.toggleCurrentFile,
+	toggleAllCmdKey:       model.toggleAllFiles,
+	toggleDirectoryCmdKey: model.toggleDirectory,
+	toggleHelpCmdKey:      model.toggleHelp,
+	closeHelpCmdKey:       model.closeHelp,
+	gotoTopCmdKey:         model.gotoTop,
+	gotoBottomCmdKey:      model.gotoBottom,
+}
+
+func filterKeymap(originalMap map[string]string, prefix string) map[string]string {
+	
+	filteredMap := make(map[string]string)
+
+	for key, cmd := range originalMap {
+		
+		if strings.HasPrefix(key, prefix) {
+			
+			filteredMap[key] = cmd
+		}
+	}
+
+	return filteredMap
+}
+
+func initKeymaps() map[string]Keymap{
+	//TODO: add parameter for config
+	var keymaps = defaultKeymaps;
+
+	fastLookupMap := make(map[string]Keymap)
+	for _, item := range keymaps {
+		fastLookupMap[item.keys] = item
+	}
+	return fastLookupMap
 }
 
 func initialModel(startPath string) model {
@@ -85,11 +166,15 @@ func initialModel(startPath string) model {
 	root, _ := buildFileTree(path)
 
 	loadState(root, path)
+	var keymaps = initKeymaps()
 
 	return model{
 		root:         root,
 		visibleNodes: flattenVisible(root),
 		cursor:       0,
+		keymaps: keymaps,
+		keySeq: "",
+		filteredKeymaps: keymaps,
 	}
 }
 
@@ -146,6 +231,13 @@ func (m model) renderContent() string {
 	return s.String()
 }
 
+func keyMsgToKeyStr(msg string) string{
+	if len(msg) == 1{
+		return msg;
+	}
+	return "<"+msg+">"
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	log.Printf("%+v", msg)
 
@@ -171,48 +263,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		// --- App State ---
-		case "ctrl+c", "q":
-			return m, tea.Quit
-
-		// --- Undo / Redo (Domain State) ---
-		case "u":
-			m = m.performUndo()
-		case "ctrl+r":
-			m = m.performRedo()
-
-		// --- Selection (Domain State) ---
-		case " ", "s":
-			m = m.toggleCurrentFile()
-		case "a":
-			m = m.toggleAllFiles()
-
-		// --- UI & Navigation (No Undo) ---
-		case "up", "k":
-			m = m.moveUp()
-		case "down", "j":
-			m = m.moveDown()
-		case "ctrl+u":
-			m = m.pageUp()
-		case "ctrl+d":
-			m = m.pageDown()
-		case "g":
-			m = m.gotoTop()
-		case "G":
-			m = m.gotoBottom()
-		case "enter":
-			m = m.toggleDirectory()
-		case "T":
-			m = m.toggleExpandAll()
-		case "S":
-			m.selectedMode = !m.selectedMode
-		case "?":
-			m = m.toggleHelp()
-		case "esc":
-			m = m.closeHelp()
-			// case "y":
-			// 	// Copy action (not implemented in TUI yet)
+		keyStr := keyMsgToKeyStr(msg.String())
+		val, ok := m.keymaps[keyStr]
+		if ok {
+			fn, ok := commandRegistry[val.cmdKey]
+			if ok {
+				m = fn(m)
+			}else{
+				log.Printf("Command key '%s' not found in command registry", val.cmdKey)
+			}
 		}
 	}
 
