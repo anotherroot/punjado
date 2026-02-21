@@ -137,6 +137,10 @@ func (m model) gotoTop() model {
 	return m
 }
 
+func (m model) quit() model {
+	m.quitting = true
+	return m
+}
 func (m model) gotoBottom() model {
 	m.cursor = len(m.visibleNodes) - 1
 	m.viewport.GotoBottom()

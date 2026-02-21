@@ -72,6 +72,8 @@ type model struct {
 	helpMode     bool
 	selectedMode bool
 
+	quitting bool
+
 	undoStack []Action
 	redoStack []Action
 
@@ -97,6 +99,7 @@ const redoCmdKey = "redo"
 const undoCmdKey = "undo"
 const moveUpCmdKey = "moveUp"
 const moveDownCmdKey = "moveDown"
+const quitCmdKey = "quit"
 
 var defaultKeymaps = []Keymap{
 	{keys: "j", cmdKey: moveDownCmdKey},
@@ -111,8 +114,10 @@ var defaultKeymaps = []Keymap{
 	{keys: "<enter>", cmdKey: toggleDirectoryCmdKey},
 	{keys: "?", cmdKey: toggleHelpCmdKey},
 	{keys: "<esc>", cmdKey: closeHelpCmdKey},
-	{keys: "g", cmdKey: gotoTopCmdKey},
+	{keys: "gg", cmdKey: gotoTopCmdKey},
 	{keys: "G", cmdKey: gotoBottomCmdKey},
+	{keys: "q", cmdKey: quitCmdKey},
+	{keys: "ZZ", cmdKey: quitCmdKey},
 }
 
 type CmdFunc func(model) model
@@ -129,16 +134,17 @@ var commandRegistry = map[string]CmdFunc{
 	closeHelpCmdKey:       model.closeHelp,
 	gotoTopCmdKey:         model.gotoTop,
 	gotoBottomCmdKey:      model.gotoBottom,
+	quitCmdKey:            model.quit,
 }
 
-func filterKeymap(originalMap map[string]string, prefix string) map[string]string {
-	
-	filteredMap := make(map[string]string)
+func filterKeymap(originalMap map[string]Keymap, prefix string) map[string]Keymap {
+
+	filteredMap := make(map[string]Keymap)
 
 	for key, cmd := range originalMap {
-		
+
 		if strings.HasPrefix(key, prefix) {
-			
+
 			filteredMap[key] = cmd
 		}
 	}
@@ -146,9 +152,9 @@ func filterKeymap(originalMap map[string]string, prefix string) map[string]strin
 	return filteredMap
 }
 
-func initKeymaps() map[string]Keymap{
+func initKeymaps() map[string]Keymap {
 	//TODO: add parameter for config
-	var keymaps = defaultKeymaps;
+	var keymaps = defaultKeymaps
 
 	fastLookupMap := make(map[string]Keymap)
 	for _, item := range keymaps {
@@ -169,11 +175,11 @@ func initialModel(startPath string) model {
 	var keymaps = initKeymaps()
 
 	return model{
-		root:         root,
-		visibleNodes: flattenVisible(root),
-		cursor:       0,
-		keymaps: keymaps,
-		keySeq: "",
+		root:            root,
+		visibleNodes:    flattenVisible(root),
+		cursor:          0,
+		keymaps:         keymaps,
+		keySeq:          "",
 		filteredKeymaps: keymaps,
 	}
 }
@@ -231,11 +237,11 @@ func (m model) renderContent() string {
 	return s.String()
 }
 
-func keyMsgToKeyStr(msg string) string{
-	if len(msg) == 1{
-		return msg;
+func keyMsgToKeyStr(msg string) string {
+	if len(msg) == 1 {
+		return msg
 	}
-	return "<"+msg+">"
+	return "<" + msg + ">"
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -264,15 +270,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		keyStr := keyMsgToKeyStr(msg.String())
-		val, ok := m.keymaps[keyStr]
-		if ok {
-			fn, ok := commandRegistry[val.cmdKey]
+		log.Printf("Pressed '%s'", keyStr)
+		m.keySeq = m.keySeq + keyStr
+		m.filteredKeymaps = filterKeymap(m.keymaps, m.keySeq)
+		log.Printf("keySeq '%s'", m.keySeq)
+		log.Printf("filteredKeymaps '%+v'", m.filteredKeymaps)
+
+		if len(m.filteredKeymaps) == 0 {
+			log.Printf("Reset keySeq")
+			m.keySeq = ""
+			m.filteredKeymaps = m.keymaps
+		} else {
+			val, ok := m.filteredKeymaps[m.keySeq]
 			if ok {
-				m = fn(m)
-			}else{
-				log.Printf("Command key '%s' not found in command registry", val.cmdKey)
+				fn, ok := commandRegistry[val.cmdKey]
+				if ok {
+					m = fn(m)
+					log.Printf("Running command '%s'", val.cmdKey)
+				} else {
+					log.Printf("Command key '%s' not found in command registry", val.cmdKey)
+				}
+				m.keySeq = ""
+				m.filteredKeymaps = m.keymaps
 			}
 		}
+	}
+	if m.quitting {
+		return m, tea.Quit
 	}
 
 	m.viewport.SetContent(m.renderContent())
@@ -365,13 +389,30 @@ func (m model) ViewFooter() string {
 		return keyStyle.Render(k) + descStyle.Render(desc)
 	}
 
-	return "\n" +
-		key("↑/↓", "move") +
+	// 1. Build the left side
+	leftSide := key("↑/↓", "move") +
 		key("space", "toggle dir") +
 		key("s", "select") +
 		key("q", "quit") +
 		key("a", "toggle all") +
 		key("y", "to clipboard")
+
+	// 2. Build the right side (the active sequence)
+	rightSide := ""
+	if m.keySeq != "" {
+		// Give it a nice bold/colored style so the user notices it
+		seqStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffa000")).Bold(true)
+		rightSide = seqStyle.Render(m.keySeq)
+	}
+
+	// 3. Calculate spacing
+	w := m.width - lipgloss.Width(leftSide) - lipgloss.Width(rightSide)
+	if w < 0 {
+		w = 0
+	}
+	spacer := strings.Repeat(" ", w)
+
+	return "\n" + leftSide + spacer + rightSide
 }
 
 func (m model) countSelectedTokens() int {
